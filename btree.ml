@@ -1,12 +1,13 @@
-type keys = int list;;
-type pl = int;;
-type root = bool;;
+type keys = int list
+type pl = int
+type root = bool
 type t = int
-type node = Lf of keys * pl list * root * t | Il of keys * pl list * node list * root * t;;
+type node = Lf of keys * pl list * root * t | Il of keys * pl list * node list * root * t
 
 exception MalformedTree of string
 exception NotFound of string
 exception NullTree of string
+exception TreeCapacityNotMet of string
 
 (* searches for a node with key k and returns node along with index *)
 let rec search tree k i = match tree with
@@ -25,29 +26,29 @@ let rec search tree k i = match tree with
     if next =[] then raise (NotFound "key not found")
     else search (Lf (next, pls, r, t)) k (i+1)
   else raise (NotFound "key not found")
-| _ -> raise (NotFound "key not found");;
+| _ -> raise (NotFound "key not found")
 
 let rec get_left l m = match l with
 | c::cs -> if c==m then [] else c::(get_left cs m)
-| [] -> [];;
+| [] -> []
 
 let rec get_right l m = match l with
 | c1::c2::cs -> 
   if c1==m then c2::(get_right (c2::cs) c2)
   else get_right (c2::cs) m
 | c::[] -> []
-| [] -> [];;
+| [] -> []
 
 (* adds a key, payload and two children to a node *)
 (* key must not already be in the node *)
 let rec update_node tree k p c1 c2 = match tree with
 | Il (v::next, pl::pls, cn, r, t) ->
   if k>v then
-    if next=[] then Il (v::k::next, pl::p::pls, List.append cn (c1::c2::[]), r, t)
+    if next=[] then Il (v::k::next, pl::p::pls, cn @ (c1::c2::[]), r, t)
     else update_node (Il (next, pls, cn, r, t)) k p c1 c2
   else if k<v then Il (k::v::next, p::pl::pls, c1::c2::cn, r, t)
   else raise (MalformedTree "key already in node")
-| _ -> raise (NullTree "");;
+| _ -> raise (NullTree "")
 
 (* splits a root node into three *)
 (* resulting in a new root and increasing the tree depth by 1 *)
@@ -61,7 +62,7 @@ let rec split_root tree = match tree with
 let tl = Lf (get_left ks mk, get_left pls mp, false, t) in
 let tr = Lf (get_right ks mk, get_right pls mp, false, t) in
 Il (mk::[], mp::[], tl::tr::[], true, t)
-| _ -> raise (NullTree "");;
+| _ -> raise (NullTree "")
 
 (* splits a node in two on the median key *)
 (* migrates median key to parent node and returns parent, which may now be full *)
@@ -77,7 +78,7 @@ let rec split tree parent = match tree, parent with
   let tr = Lf (get_right ks mk, get_right pls mp, false, t) in
   update_node parent mk mp tl tr
 | _ , Lf _ -> raise (MalformedTree "leaf node cannot be parent")
-| _ -> raise (NullTree "");;
+| _ -> raise (NullTree "")
 
 (* inserts a given key and payload into the tree *)
 let rec insert tree (k, p) = match tree with
@@ -109,4 +110,26 @@ let rec insert tree (k, p) = match tree with
       else insert c2 (k, p)
     | _ -> raise (MalformedTree "internal node must have >1 child")
   else insert (Il (next, pls, c1::c2::cn, r, t)) (k, p)
-| _ -> raise (MalformedTree "internal node cannot be empty or without children");;
+| _ -> raise (MalformedTree "internal node cannot be empty or without children")
+
+let rec merge parent acck accp accn s1 s2 = match parent with
+| Lf _ -> raise (MalformedTree "lead node cannot be parent")
+| Il(v::next, pl::pls, c1::c2::cn, r, t) -> 
+  if (c1==s1 && c2==s2) then match s1, s2 with
+    | Lf _, Il _ -> raise (MalformedTree "nodes must be at same level")
+    | Il _, Lf _ -> raise (MalformedTree "nodes must be at same level")
+    | Lf (k1s, p1s, false, t1), Lf (k2s, p2s, false, t2) ->
+      let km, pm = k1s @ [v] @ k2s, p1s @ [pl] @ p2s in
+      let l = List.length(k1s) in 
+      if (l < t-1 || l > 2*t-1) then raise (TreeCapacityNotMet "")
+      else let s = Lf (km, pm, false, t) in
+      Il (acck @ next, accp @ pls, accn @ s::cn, r, t)
+    | Il (k1s, p1s, cn1, false, t1), Il (k2s, p2s, cn2, false, t2) ->
+      let km, pm, cm = k1s @ [v] @ k2s, p1s @ [pl] @ p2s, cn1 @ cn2 in
+      let l = List.length(k1s) in
+      if (l < t-1 || l > 2*t-1) then raise (TreeCapacityNotMet "")
+      else let s = Il (km, pm, cm, false, t) in
+      Il (acck @ next, accp @ pls, accn @ s::cn, r, t)
+    | _, _ -> raise (MalformedTree "child nodes cannot be empty")
+  else merge (Il (next, pls, cn, r, t)) (v::acck) (pl::accp) (c1::c2::accn) s1 s2
+| _ -> raise (NullTree "") (* occurs if s1 and s2 are not children of parent *)
