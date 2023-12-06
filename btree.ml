@@ -16,7 +16,7 @@ let rec search tree k i = match tree with
   else if v<k then search c k (i+1)
   else if next=[] then match cn with
     | rc::[] -> search rc k (i+1)
-    | _ -> raise (MalformedTree "incorrect tree structure")
+    | _ -> raise (MalformedTree "final key must have right child")
   else search (Il (next, pls, c::cn, r, t)) k (i+1)
 | Lf (v::next, pls, r, t) ->
   if (i == 0 && not r) then raise (MalformedTree "index 0 not at root")
@@ -38,28 +38,18 @@ let rec get_right l m = match l with
 | c::[] -> []
 | [] -> [];;
 
-let rec add_key ks k = match ks with
-| c::cs ->
-  if k < c then k::ks
-  else if k==c then ks
-  else c::(add_key cs k)
-| [] -> k::[]
-
+(* adds a key, payload and two children to a node *)
+(* key must not already be in the node *)
 let rec update_node tree k p c1 c2 = match tree with
-| Lf (v::next, pl::pls, r, t) ->
-  if k>v then update_node (Lf (next, pls, r, t)) k p c1 c2
-  else if k<v then update_node (Lf (k::v::next, p::pl::pls, r, t)) k p c1 c2
-  else raise (MalformedTree "")
 | Il (v::next, pl::pls, cn, r, t) ->
   if k>v then
-    if next=[] then Il (v::k::next, List.append pls [p], List.append cn (c1::c2::[]), r, t)
+    if next=[] then Il (v::k::next, pl::p::pls, List.append cn (c1::c2::[]), r, t)
     else update_node (Il (next, pls, cn, r, t)) k p c1 c2
   else if k<v then Il (k::v::next, p::pl::pls, c1::c2::cn, r, t)
-  else raise (MalformedTree "")
-| _ -> raise (MalformedTree "");;
+  else raise (MalformedTree "key already in node")
+| _ -> raise (NullTree "");;
 
-(* splits a internal node into two on the median key *)
-(* unless it is a root, in which case the node is split into three *)
+(* splits a root node into three *)
 (* resulting in a new root and increasing the tree depth by 1 *)
 let rec split_root tree = match tree with
 | Il (ks, pls, c::cn, true, t) -> 
@@ -73,35 +63,50 @@ let tr = Lf (get_right ks mk, get_right pls mp, false, t) in
 Il (mk::[], mp::[], tl::tr::[], true, t)
 | _ -> raise (NullTree "");;
 
+(* splits a node in two on the median key *)
+(* migrates median key to parent node and returns parent, which may now be full *)
 let rec split tree parent = match tree, parent with
 | Il (ks, pls, c::cn, r, t), Il (ks1, pl1, cn1, r1, t1) ->
-  let mk, mp, mc = List.nth ks (t-1), List.nth pls t-1, List.nth cn (t-2) in
+  let mk, mp, mc = List.nth ks (t-1), List.nth pls (t-1), List.nth cn (t-2) in
   let tl = Il (get_left ks mk, get_left pls mp, c::(get_left cn mc), false, t) in
   let tr = Il (get_right ks mk, get_right pls mp, mc::(get_right cn mc), false, t) in
   update_node parent mk mp tl tr
-| Il (ks, pls, cn, r, t), Lf (ks1, pl1, r1, t1) -> raise (NullTree "")
+| Lf (ks, pls, r, t), Il (ks1, pls1, cn1, r1, t1) ->
+  let mk, mp = List.nth ks (t-1), List.nth pls (t-1) in
+  let tl = Lf (get_left ks mk, get_left pls mp, false, t) in
+  let tr = Lf (get_right ks mk, get_right pls mp, false, t) in
+  update_node parent mk mp tl tr
 | _ , Lf _ -> raise (MalformedTree "leaf node cannot be parent")
-| _ -> raise (MalformedTree "");;
+| _ -> raise (NullTree "");;
 
 (* inserts a given key and payload into the tree *)
 let rec insert tree (k, p) = match tree with
 | Lf (v::next, pl::pls, true, t) ->
-  if (List.length(next)+1) == 2*t then insert (split_root tree) (k, p)
+  if (List.length(next)+1) == 2*t-1 then insert (split_root tree) (k, p)
   else if k<v then Lf (k::v::next, p::pl::pls, true, t)
   else if k==v then Lf (v::next, p::pls, true, t) (* update payload *)
+  else if next=[] then Lf (v::k::next, pl::p::pls, true, t)
   else insert (Lf (next, pls, true, t)) (k, p)
 | Il (v::next, pl::pls, c1::c2::cn, r, t) -> (* every non-leaf node must have at least 2 children *)
-  if (List.length(next)+1) == 2*t-1 then 
+  if (List.length(next)+1) == 2*t-1 then
     if r then insert (split_root tree) (k, p) (* root is full *)
-    else if k < v then match c1 with
-      | Il (k1s, p1::pl1, cn1, r1, t) -> 
-        if List.length cn1 == 2*t - 1 then insert (split c1 tree) (k, p)
-        else insert c1 (k, p)
-      | Lf (v1::next1, p1::pl1, r1, t) -> 
-        if (List.length(next1)+1) == 2*t then insert (split c1 tree) (k, p)
-        else insert c1 (k, p)
-      | _ -> raise (MalformedTree "incorrect tree structure")
-    else if k == v then Il (v::next, p::pls, c1::c2::cn, r, t)
-    else insert (Il (next, pls, c1::c2::cn, r, t)) (k, p)
-  else raise (MalformedTree "incorrect tree structure")
-| _ -> raise (MalformedTree "incorrect tree structure");;
+    else raise (MalformedTree "parent node cannot be full")
+  else if k<v then match c1 with
+    | Il (k1s, p1::pl1, cn1, r1, t) -> 
+      if List.length k1s == 2*t-1 then insert (split c1 tree) (k, p)
+      else insert c1 (k, p)
+    | Lf (v1::next1, p1::pl1, r1, t) -> 
+      if (List.length(next1)+1) == 2*t-1 then insert (split c1 tree) (k, p)
+      else insert c1 (k, p)
+    | _ -> raise (MalformedTree "internal node must have >1 child")
+  else if k==v then Il (v::next, p::pls, c1::c2::cn, r, t) (* update payload *)
+  else if next=[] then match c2 with (* rightmost child *)
+    | Il (k2s, p2::pl2, cn2, r2, t) ->
+      if List.length k2s == 2*t-1 then insert (split c2 tree) (k, p)
+      else insert c2 (k, p)
+    | Lf (v2::next2, p2::pl2, r2, t) ->
+      if (List.length(next2)+1) == 2*t-1 then insert (split c2 tree) (k, p)
+      else insert c2 (k, p)
+    | _ -> raise (MalformedTree "internal node must have >1 child")
+  else insert (Il (next, pls, c1::c2::cn, r, t)) (k, p)
+| _ -> raise (MalformedTree "internal node cannot be empty or without children");;
