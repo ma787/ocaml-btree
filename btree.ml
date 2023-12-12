@@ -87,7 +87,7 @@ let rec split tree parent m = match tree, parent with
 (* inserts a given key and payload into the tree *)
 let rec insert tree (k, p) = match tree with
 | Lf (v::next, pl::pls, true, t) ->
-  if List.length(v::next) == 2*t-1 then insert (split_root tree) (k, p)
+  if List.length (v::next) == 2*t-1 then insert (split_root tree) (k, p)
   else if k<v then Lf (k::v::next, p::pl::pls, true, t)
   else if k=v then Lf (v::next, p::pls, true, t) (* update payload *)
   else if next=[] then Lf (v::k::next, pl::p::pls, true, t)
@@ -101,7 +101,7 @@ let rec insert tree (k, p) = match tree with
       if List.length k1s == 2*t-1 then insert (split c1 tree (t-1)) (k, p)
       else insert c1 (k, p)
     | Lf (v1::next1, p1::pl1, r1, t) -> 
-      if List.length(v1::next1) == 2*t-1 then insert (split c1 tree (t-1)) (k, p)
+      if List.length (v1::next1) == 2*t-1 then insert (split c1 tree (t-1)) (k, p)
       else insert c1 (k, p)
     | _ -> raise (MalformedTree "internal node must have >1 child")
   else if k=v then Il (v::next, p::pls, c1::c2::cn, r, t) (* update payload *)
@@ -110,7 +110,7 @@ let rec insert tree (k, p) = match tree with
       if List.length k2s == 2*t-1 then insert (split c2 tree (t-1)) (k, p)
       else insert c2 (k, p)
     | Lf (v2::next2, p2::pl2, r2, t) ->
-      if List.length(v2::next2) == 2*t-1 then insert (split c2 tree (t-1)) (k, p)
+      if List.length (v2::next2) == 2*t-1 then insert (split c2 tree (t-1)) (k, p)
       else insert c2 (k, p)
     | _ -> raise (MalformedTree "internal node must have >1 child")
   else insert (Il (next, pls, c1::c2::cn, r, t)) (k, p)
@@ -131,16 +131,49 @@ let rec merge parent s1 s2 ignore = match parent with
     | Il _, Lf _ -> raise (MalformedTree "nodes must be at same level")
     | Lf (k1s, p1s, false, t1), Lf (k2s, p2s, false, t2) ->
       let km, pm = k1s @ (v::k2s), p1s @ (pl::p2s) in (* TODO: concatenate lists without @ *)
-      let l = List.length(km) in 
+      let l = List.length km in 
       if ((l < t-1 || l > 2*t-1) && not ignore) then raise (TreeCapacityNotMet "")
       else let s = Lf (km, pm, false, t) in
       Il (next, pls, s::cn, r, t)
     | Il (k1s, p1s, cn1, false, t1), Il (k2s, p2s, cn2, false, t2) ->
       let km, pm, cm = k1s @ (v::k2s), p1s @ (pl::p2s), cn1 @ cn2 in
-      let l = List.length(k1s) in
+      let l = List.length k1s in
       if (l < t-1 || l > 2*t-1) then raise (TreeCapacityNotMet "")
       else let s = Il (km, pm, cm, false, t) in
       Il (next, pls, s::cn, r, t)
     | _, _ -> raise (MalformedTree "child nodes cannot be empty")
   else restore (merge (Il (next, pls, (c2::cn), r, t)) s1 s2 ignore) v pl c1
 | _ -> raise (NotFound "could not find sibling nodes") (* occurs if s1 and s2 are not children of parent *)
+
+let rec redistribute tree parent = match parent with
+| Lf _ -> raise (MalformedTree "leaf node cannot be parent")
+| Il (v::next, pl::pls, c1::c2::cn, r, t) ->
+  if c1=tree then match c2 with
+    | Lf (ks, pls, r, t) -> 
+      let l = List.length ks in
+      if l > t-1 then split (merge parent tree c2 true) parent (l-1)
+      else raise (NullTree "")
+    | Il (ks, pls, cn, r, t) ->
+      let l = List.length ks in
+      if l > t-1 then split (merge parent tree c2 true) parent (l-1)
+      else raise (NullTree "")
+  else if c2=tree then match c1 with
+    | Lf (ks, pls, r, t) -> 
+      let l = List.length ks in
+      if l > t-1 then split (merge parent c1 tree true) parent (l-1)
+      else raise (NullTree "")
+    | Il (ks, pls, cn, r, t) ->
+      let l = List.length ks in
+      if l > t-1 then split (merge parent c1 tree true) parent (l-1)
+      else raise (NullTree "")
+  else restore (redistribute tree (Il (next, pls, cn, r, t))) v pl c1
+| _ -> raise (MalformedTree "")
+
+let rec refill tree parent = try redistribute tree parent with (NullTree "") ->
+  match parent with
+  | Lf _ -> raise (MalformedTree "leaf node cannot be parent")
+  | Il (v::next, pl::pls, c1::c2::cn, r, t) ->
+    if c1=tree then merge parent tree c2 false
+    else if c2=tree then merge parent c1 tree false
+    else raise (MalformedTree "")
+  | _ -> raise (MalformedTree "")
