@@ -84,6 +84,13 @@ let rec split tree parent m = match tree, parent with
 | _ , Lf _ -> raise (MalformedTree "leaf node cannot be parent")
 | _ -> raise (NullTree "")
 
+let rec restore tree k p c = match tree with
+| Lf ([], [], r, t) -> Lf (k::[], p::[], r, t)
+| Lf (v::next, pl::pls, r, t) -> Lf(k::v::next, p::pl::pls, r, t)
+| Il ([], [], cn, r, t) -> Il(k::[], p::[], c::cn, r, t)
+| Il (v::next, pl::pls, cn, r, t) -> Il (k::v::next, p::pl::pls, c::cn, r, t)
+| _ -> raise (MalformedTree "keys/payloads/children mismatch")
+
 (* inserts a given key and payload into the tree *)
 let rec insert tree (k, p) = match tree with
 | Lf (v::next, pl::pls, true, t) ->
@@ -91,7 +98,8 @@ let rec insert tree (k, p) = match tree with
   else if k<v then Lf (k::v::next, p::pl::pls, true, t)
   else if k=v then Lf (v::next, p::pls, true, t) (* update payload *)
   else if next=[] then Lf (v::k::next, pl::p::pls, true, t)
-  else insert (Lf (next, pls, true, t)) (k, p)
+  else insert (Lf (next, pls, true, t)) (k, p) (* TODO: find a way to restore keys that have been skipped *)
+| Lf ([], [], true, t) -> Lf (k::[], p::[], true, t)
 | Il (v::next, pl::pls, c1::c2::cn, r, t) -> (* every non-leaf node must have at least 2 children *)
   if List.length(v::next) == 2*t-1 then
     if r then insert (split_root tree) (k, p) (* root is full *)
@@ -99,29 +107,22 @@ let rec insert tree (k, p) = match tree with
   else if k<v then match c1 with
     | Il (k1s, p1::pl1, cn1, r1, t) -> 
       if List.length k1s == 2*t-1 then insert (split c1 tree (t-1)) (k, p)
-      else insert c1 (k, p)
+      else let c  = insert c1 (k, p) in Il (k::v::next, pl::p::pls, c::c2::cn, r, t)
     | Lf (v1::next1, p1::pl1, r1, t) -> 
       if List.length (v1::next1) == 2*t-1 then insert (split c1 tree (t-1)) (k, p)
-      else insert c1 (k, p)
+      else let c  = insert c1 (k, p) in Il (k::v::next, pl::p::pls, c::c2::cn, r, t)
     | _ -> raise (MalformedTree "internal node must have >1 child")
   else if k=v then Il (v::next, p::pls, c1::c2::cn, r, t) (* update payload *)
   else if next=[] then match c2 with (* rightmost child *)
     | Il (k2s, p2::pl2, cn2, r2, t) ->
       if List.length k2s == 2*t-1 then insert (split c2 tree (t-1)) (k, p)
-      else insert c2 (k, p)
+      else let c  = insert c2 (k, p) in Il (k::v::next, pl::p::pls, c1::c::cn, r, t)
     | Lf (v2::next2, p2::pl2, r2, t) ->
       if List.length (v2::next2) == 2*t-1 then insert (split c2 tree (t-1)) (k, p)
-      else insert c2 (k, p)
+      else let c  = insert c2 (k, p) in Il (k::v::next, pl::p::pls, c1::c::cn, r, t)
     | _ -> raise (MalformedTree "internal node must have >1 child")
-  else insert (Il (next, pls, c1::c2::cn, r, t)) (k, p)
+  else restore (insert (Il (next, pls, c2::cn, r, t)) (k, p)) v pl c1
 | _ -> raise (MalformedTree "internal node cannot be empty or without children")
-
-let rec restore tree k p c = match tree with
-| Lf ([], [], r, t) -> Lf (k::[], p::[], r, t)
-| Lf (v::next, pl::pls, r, t) -> Lf(k::v::next, p::pl::pls, r, t)
-| Il ([], [], cn, r, t) -> Il(k::[], p::[], c::cn, r, t)
-| Il (v::next, pl::pls, cn, r, t) -> Il (k::v::next, p::pl::pls, c::cn, r, t)
-| _ -> raise (MalformedTree "keys/payloads/children mismatch")
 
 let rec merge parent s1 s2 ignore = match parent with
 | Lf _ -> raise (MalformedTree "leaf node cannot be parent")
@@ -177,3 +178,27 @@ let rec refill tree parent = try redistribute tree parent with (NullTree "") ->
     else if c2=tree then merge parent c1 tree false
     else raise (MalformedTree "")
   | _ -> raise (MalformedTree "")
+
+  let rec replace_child parent old newc = match old, parent with
+  | _, Lf _ -> raise (MalformedTree "leaf node cannot be parent")
+  | _, Il (_, _, [], _, _) -> raise (NotFound "child not found")
+  | Lf (v::next, pl::pls, r, t), Il (k::k1s, p::p1s, c::cn, r1, t1) ->
+    if old=c then Il (k::k1s, p::p1s, newc::cn, r1, t1) 
+    else restore (replace_child (Il (k1s, p1s, cn, r1, t1)) old newc) k p c
+
+let rec delete tree parent k = match tree, parent with
+| _, Lf _ -> raise (MalformedTree "leaf node cannot be parent")
+| Lf (v::next, pl::pls, r, t), _ ->
+  if k=v then
+    if List.length (v::next) > t-2 then replace_child parent tree (Lf (next, pls, r, t))
+    else let l = refill tree parent in match l with
+    | Lf (v::next, pl::pls, r, t) -> Lf (next, pls, r, t)
+    | _ -> raise (MalformedTree "can only delete from leaf")
+  else if k<v then raise (NotFound "key not found")
+  else restore (delete (Lf (next, pls, r, t)) parent k) v pl (Lf ([], [], false, 0))
+| _, Il (ks, pls, c1::c2::cn, r, t) -> match c2 with
+  | Il (k1s, p1s, c::cn1, r, t) -> match c with
+    | Lf _ -> delete c c2 k
+    | _ -> raise (MalformedTree "inorder successor not leaf")
+  | _ -> raise (MalformedTree "inorder successor not leaf")
+| _ -> raise (NullTree "")
