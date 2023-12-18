@@ -14,7 +14,7 @@ let rec to_string tree = let ks, ps, cs, root, tval = match tree with
 | Lf (k, p, r, t) -> k, p, [], r, t in
 let string_of_int_list l = "[" ^ (List.fold_left (fun acc x -> acc ^ string_of_int x ^ ",") "" l) ^ "]" in
 let string_of_tree_list l = "[" ^ (List.fold_left (fun acc x -> acc ^ (to_string x) ^ ",") "" l) ^ "]" in
-"(" ^ (string_of_int_list ks) ^ ", " ^ (string_of_int_list ps) ^ ", " ^ (string_of_tree_list cs) ^ ", " ^ (string_of_bool root) ^ ", " ^ (string_of_int tval) ^ ")"
+"(" ^ (string_of_int_list ks) ^ ", " ^ (string_of_int_list ps) ^ ", " ^ (if List.length cs > 0 then ((string_of_tree_list cs) ^ ", ") else "") ^ (string_of_bool root) ^ ", " ^ (string_of_int tval) ^ ")"
 
 (* searches for a node with key k and returns node along with index *)
 let rec search tree k i = match tree with
@@ -40,34 +40,47 @@ let rec get_left l i m = match l with
 | [] -> []
 
 let rec get_right l i m = match l with
-| c1::c2::cs -> 
-  if i=m then c2::(get_right (c2::cs) (i+1) m)
-  else get_right (c2::cs) (i+1) m
-| c::[] -> []
+| c::cs -> 
+  if m=(-1) then c::(get_right cs i m)
+  else if i=m then get_right cs i (-1)
+  else get_right cs (i+1) m
 | [] -> []
+
+let rec restore tree k p c = match tree with
+| Lf ([], [], r, t) -> Lf (k::[], p::[], r, t)
+| Lf (v::next, pl::pls, r, t) -> Lf(k::v::next, p::pl::pls, r, t)
+| Il ([], [], cn, r, t) -> Il(k::[], p::[], c::cn, r, t)
+| Il (v::next, pl::pls, cn, r, t) -> Il (k::v::next, p::pl::pls, c::cn, r, t)
+| _ -> raise (MalformedTree "keys/payloads/children mismatch")
 
 (* adds a key, payload and child to a node *)
 (* key must not already be in the node *)
 let rec update_node tree k p c1 c2 = match tree with
-| Il (v::next, pl::pls, ca::cb::cn, r, t) ->
-  if k>v then
-    if next=[] then
-      if c1=cb then Il (v::k::next, pl::p::pls, ca::cb::c2::cn, r, t)
-      else raise (MalformedTree ("child mismatch, " ^ (to_string c1) ^ " != " ^ (to_string cb)))
-    else update_node (Il (next, pls, (cb::cn), r, t)) k p c1 c2
-  else if k<v then 
-    if c2=ca then Il (k::v::next, p::pl::pls, c1::ca::cb::cn, r, t)
-    else raise (MalformedTree ("child mismatch, " ^ (to_string c2) ^ " != " ^ (to_string ca)))
-  else raise (MalformedTree "key already in node")
-| _ -> raise (NullTree "")
+| Il (v::next, pl::pls, c::cn, r, t) -> (match c1, c with
+  | Lf (k1::k1s, p1::p1s, r1, t1), Lf (k3::k3s, p3::p3s, r3, t3) ->
+    if (k1=k3 && p1=p3) then Il (k::v::next, p::pl::pls, c1::c2::cn, r, t)
+    else restore (update_node (Il (next, pls, cn, r, t)) k p c1 c2) v pl c
+  | Il (k1::k1s, p1::p1s, c1::cn1, r1, t1), Il (k3::k3s, p3::p3s, c3::cn3, r3, t3) ->
+    if (k1=k3 && p1=p3) then Il (k::v::next, p::pl::pls, c1::c2::cn, r, t)
+    else restore (update_node (Il (next, pls, cn, r, t)) k p c1 c2) v pl c
+  | _ -> raise (MalformedTree "child type mismatch"))
+| Il ([], [], c::[], r, t) -> (match c1, c with (* right-most node *)
+  | Lf (k1::k1s, p1::p1s, r1, t1), Lf (k3::k3s, p3::p3s, r3, t3) ->
+    if (k1=k3 && p1=p3) then Il (k::[], p::[], c1::c2::[], r, t)
+    else raise (MalformedTree "child node to split not found")
+  | Il (k1::k1s, p1::p1s, c1::cn1, r1, t1), Il (k3::k3s, p3::p3s, c3::cn3, r3, t3) ->
+    if (k1=k3 && p1=p3) then Il (k::[], p::[], c1::c2::[], r, t)
+    else raise (MalformedTree "child node to split not found")
+  | _ -> raise (MalformedTree "child type mismatch"))
+| _ -> raise (MalformedTree "must be internal node with >1 child")
 
 (* splits a root node into three *)
 (* resulting in a new root and increasing the tree depth by 1 *)
 let rec split_root tree = match tree with
 | Il (ks, pls, c::cn, true, t) -> 
-  let mk, mp, mc = List.nth ks (t-1), List.nth pls (t-1), List.nth cn (t-2) in
+  let mk, mp = List.nth ks (t-1), List.nth pls (t-1) in
   let tl = Il (get_left ks 0 (t-1), get_left pls 0 (t-1), c::(get_left cn 0 (t-1)), false, t) in
-  let tr = Il (get_right ks 0 (t-1), get_right pls 0 (t-1), mc::(get_right cn 0 (t-1)), false, t) in
+  let tr = Il (get_right ks 0 (t-1), get_right pls 0 (t-1), get_right (c::cn) 0 (t-1), false, t) in
   Il (mk::[], mp::[], tl::tr::[], true, t)
 | Lf (ks, pls, r, t) -> let mk, mp = List.nth ks (t-1), List.nth pls (t-1) in
 let tl = Lf (get_left ks 0 (t-1), get_left pls 0 (t-1), false, t) in
@@ -91,46 +104,37 @@ let rec split tree parent m = match tree, parent with
 | _ , Lf _ -> raise (MalformedTree "leaf node cannot be parent")
 | _ -> raise (NullTree "")
 
-let rec restore tree k p c = match tree with
-| Lf ([], [], r, t) -> Lf (k::[], p::[], r, t)
-| Lf (v::next, pl::pls, r, t) -> Lf(k::v::next, p::pl::pls, r, t)
-| Il ([], [], cn, r, t) -> Il(k::[], p::[], c::cn, r, t)
-| Il (v::next, pl::pls, cn, r, t) -> Il (k::v::next, p::pl::pls, c::cn, r, t)
-| _ -> raise (MalformedTree "keys/payloads/children mismatch")
-
 (* inserts a given key and payload into the tree *)
-let rec insert tree k p l = match tree with
+let rec insert tree k p i = match tree with
 | Lf (v::next, pl::pls, r, t) ->
-  if l + List.length (v::next) == 2*t-1 then 
-    if r then insert (split_root tree) k p 0
-    else raise (MalformedTree "full node not split ahead of time")
+  let l = (List.length (v::next) == 2*t-1) in
+  if (l && r && not i) then insert (split_root tree) k p false
+  else if (l && not r) then raise (MalformedTree "full node not split ahead of time")
   else if k<v then Lf (k::v::next, p::pl::pls, r, t)
   else if k=v then Lf (v::next, p::pls, r, t) (* update payload *)
   else if next=[] then Lf (v::k::next, pl::p::pls, r, t)
-  else restore (insert (Lf (next, pls, r, t)) k p (l+1)) v pl (Lf ([], [], false, 0)) (* TODO: find a way to restore keys that have been skipped *)
+  else restore (insert (Lf (next, pls, r, t)) k p false) v pl (Lf ([], [], false, 0)) (* TODO: find a way to restore keys that have been skipped *)
 | Lf ([], [], true, t) -> Lf (k::[], p::[], true, t)
 | Il (v::next, pl::pls, c1::c2::cn, r, t) -> (* every non-leaf node must have at least 2 children *)
-  if (l + List.length(v::next)) == 2*t-1 then
-    if r then insert (split_root tree) k p 0 (* root is full *)
-    else raise (MalformedTree "parent node cannot be full")
+  let l = (List.length(v::next) == 2*t-1) in
+  if (l && r && not i) then insert (split_root tree) k p false (* root is full *)
+  else if (l && not r) then raise (MalformedTree "parent node cannot be full")
   else if k<v then match c1 with
     | Il (k1s, pl1, cn1, r1, t) -> 
-      if List.length k1s == 2*t-1 then insert (split c1 tree (t-1)) k p l
-      else let c  = insert c1 k p 0 in Il (v::next, pl::pls, c::c2::cn, r, t)
+      if List.length k1s == 2*t-1 then insert (split c1 tree (t-1)) k p true
+      else let c  = insert c1 k p false in Il (v::next, pl::pls, c::c2::cn, r, t)
     | Lf (k1s, pl1, r1, t) -> 
-      if List.length k1s == 2*t-1 then insert (split c1 tree (t-1)) k p l
-      else let c  = insert c1 k p 0 in Il (v::next, pl::pls, c::c2::cn, r, t)
-    | _ -> raise (MalformedTree "internal node must have >1 child")
+      if List.length k1s == 2*t-1 then insert (split c1 tree (t-1)) k p true
+      else let c  = insert c1 k p false in Il (v::next, pl::pls, c::c2::cn, r, t)
   else if k=v then Il (v::next, p::pls, c1::c2::cn, r, t) (* update payload *)
   else if next=[] then match c2 with (* rightmost child *)
     | Il (k2s, pl2, cn2, r2, t) ->
-      if List.length k2s == 2*t-1 then insert (split c2 tree (t-1)) k p l
-      else let c  = insert c2 k p 0 in Il (v::next, pl::pls, c1::c::cn, r, t)
+      if List.length k2s == 2*t-1 then insert (split c2 tree (t-1)) k p true
+      else let c  = insert c2 k p false in Il (v::next, pl::pls, c1::c::cn, r, t)
     | Lf (k2s, pl2, r2, t) ->
-      if List.length k2s == 2*t-1 then insert (split c2 tree (t-1)) k p l
-      else let c  = insert c2 k p 0 in Il (v::next, pl::pls, c1::c::cn, r, t)
-    | _ -> raise (MalformedTree "internal node must have >1 child")
-  else restore (insert (Il (next, pls, c2::cn, r, t)) k p (l+1)) v pl c1
+      if List.length k2s == 2*t-1 then insert (split c2 tree (t-1)) k p true
+      else let c  = insert c2 k p false in Il (v::next, pl::pls, c1::c::cn, r, t)
+  else restore (insert (Il (next, pls, c2::cn, r, t)) k p false) v pl c1
 | _ -> raise (MalformedTree "internal node cannot be empty or without children")
 
 let rec merge parent s1 s2 ignore = match parent with
