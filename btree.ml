@@ -209,3 +209,30 @@ let rec find_successor tree (k, p) i = match tree with
   else
     find_successor c1 (k, p) i
 | _ -> raise (NotFound "key or predecessor not found")
+
+(* swaps the positions of keys 'ok' and 'nk' in a tree along with their payloads *)
+(* nk must be either the predecessor or successor of ok and must be at a lower depth *)
+let rec swap_i tree ok op nk np i = match tree with
+| Lf (v::next, pl::pls, r, t) ->
+  if i then
+    if v=nk then Lf (ok::next, op::pls, r, t)
+    else if next=[] then raise (NotFound "at least one key to swap not found")
+    else restore (swap_i (Lf (next, pls, r, t)) ok op nk np i) v pl (Lf ([], [], false, 0))
+  else 
+    if v=ok then restore (swap_i (Lf (next, pls, r, t)) ok op nk np true) nk np (Lf ([], [], false, 0))
+    else if next=[] then raise (NotFound "at least one key to swap not found")
+    else restore (swap_i (Lf (next, pls, r, t)) ok op nk np i) v pl (Lf ([], [], false, 0))
+| Il (v::next, pl::pls, c1::c2::cn, r, t) ->
+  if i then
+    if nk<ok then
+      if next=[] then Il (v::next, pl::pls, c1::(swap_i c2 ok op nk np i)::cn, r, t)
+      else restore (swap_i (Il (next, pls, (c2::cn), r, t)) ok op nk np i) v pl c1
+    else Il (v::next, pl::pls, (swap_i c1 ok op nk np i)::c2::cn, r, t)
+  else if ok=v then
+    if nk>ok then Il (nk::next, np::pls, c1::(swap_i c2 ok op nk np true)::cn, r, t)
+    else Il (nk::next, np::pls, (swap_i c1 ok op nk np true)::c2::cn, r, t)
+  else if ok>v then 
+    if next=[] then Il (v::next, pl::pls, c1::(swap_i c2 ok op nk np i)::cn, r, t)
+    else restore (swap_i (Il (next, pls, (c2::cn), r, t)) ok op nk np i) v pl c1
+  else Il (v::next, pl::pls, (swap_i c1 ok op nk np i)::c2::cn, r, t)
+| _ -> raise (NotFound "at least one key to swap not found")
