@@ -1,3 +1,4 @@
-(executable 
-  (name test)
-  (libraries ounit2))
+(executables
+ (names btree test)
+ (libraries ounit2)
+ (modes byte exe))
