@@ -53,8 +53,8 @@ module Attrs = struct
   | Lf (ks, pls, r, t) -> ks, pls, [], r, t
 
   let rec split_ks n ks newks i = match ks with
-| c::cs -> if i=n then [c], (List.rev newks), cs else split_ks n cs (c::newks) (i+1)
-| [] -> [], List.rev newks, ks;;
+  | c::cs -> if i=n then [c], (List.rev newks), cs else split_ks n cs (c::newks) (i+1)
+  | [] -> [], List.rev newks, ks;;
 
   let rec split_cn n cn newcn i = match cn with
   | c::cs -> if i=n then (List.rev newcn), cn else split_cn n cs (c::newcn) (i+1)
