@@ -28,26 +28,6 @@ module Attrs = struct
   | Il _ -> false
   | Lf _ -> true
 
-  let is_root tree = match tree with
-  | Il (_, _, _, r, _) -> r
-  | Lf (_, _, r, _) -> r
-
-  let get_keys tree = match tree with
-  | Il (ks, _, _, _, _) -> ks
-  | Lf (ks, _, _, _) -> ks
-
-  let get_pls tree = match tree with
-  | Il (_, pls, _, _, _) -> pls
-  | Lf (_, pls, _, _) -> pls
-
-  let get_cn tree = match tree with
-  | Il (_, _, cn, _, _) -> cn
-  | _ -> []
-
-  let get_degree tree = match tree with
-  | Il (_, _, _, _, t) -> t
-  | Lf (_, _, _, t) -> t
-
   let get_all tree = match tree with
   | Il (ks, pls, cn, r, t) -> ks, pls, cn, r, t
   | Lf (ks, pls, r, t) -> ks, pls, [], r, t
@@ -194,17 +174,18 @@ let split tree parent m ignore =
     let tr = (if leaf then if left then Lf (lks, lpls, false, t) else Lf (rks, rpls, false, t)
     else if left then Il (lks, lpls, lcn, false, t) else Il (rks, rpls, rcn, false, t)) in
     mk, mp, tr in
+  let _, _, _, root, t = get_all tree in
   let root_split = 
-    if ignore then false else (is_root parent && Int.equal (get_hd parent) (get_hd tree)) in
+    if ignore then false else (root && Int.equal (get_hd parent) (get_hd tree)) in
   if is_leaf parent && not root_split then raise (InvalidOperation "cannot split with leaf node as parent")
-  else let t, cleaf = get_degree tree, is_leaf tree in
+  else let cleaf = is_leaf tree in
   let mk, mp, t_left = split_node true cleaf tree in
   let _, _, t_right = split_node false cleaf tree in
   if root_split then Il (List.hd mk::[], List.hd mp::[], t_left::t_right::[], true, t)
   else update_node parent (List.hd mk) (List.hd mp) t_left t_right
 
 let rec insert tree k p ckey ignore =
-  let t, root, leaf = get_degree tree, is_root tree, is_leaf tree in
+  let _, _, _, root, t = get_all tree in
   let lim = 2*t-1 in
   let empty, full = ckey < 0, n_keys tree = lim in
   if (full && root && not ignore) then
@@ -216,7 +197,7 @@ let rec insert tree k p ckey ignore =
   else let next = get_next tree ckey in
     if (k>ckey && next != []) then insert tree k p (List.hd next) ignore
     else let pkey = if k<ckey then [ckey] else [] in
-    if leaf then insert_key_and_pl tree k p
+    if (is_leaf tree) then insert_key_and_pl tree k p
     else let c = get_child tree pkey in
       if (n_keys c) = lim then 
         let tr = split c tree (t-1) false in insert tr k p (Attrs.get_hd tr) true
@@ -228,21 +209,22 @@ let rec merge parent v s1 s2 ignore iroot =
   let check_length l t = 
     if ((l < t-1 || l > 2*t-1) && not ignore) then 
       raise (InvalidOperation "merge will result in an invalid node") else () in
-  let t, root, leaf = get_degree parent, is_root parent, is_leaf parent in
+  let _, _, _, root, t = get_all parent in
   let one_key, next = n_keys parent = 1, get_next parent v in
   let s1_leaf, s2_leaf = is_leaf s1, is_leaf s2 in
   if ((s1_leaf && not s2_leaf) || (s2_leaf && not s1_leaf)) then
     raise (MalformedTree "internal node and leaf node at same level")
-  else if leaf then raise (InvalidOperation "cannot merge with leaf node as parent")
+  else if (is_leaf parent) then raise (InvalidOperation "cannot merge with leaf node as parent")
   else
     let m1, m2 = get_child parent [v] = s1, get_child parent next = s2 in
     if m1 && m2 then
-      let k1s, k2s = get_keys s1, get_keys s2 in
-      let p1s, p2s = get_pls s1, get_pls s2 in
+      let k1s, p1s, cn1, _, _ = get_all s1 in
+      let k2s, p2s, cn2, _, _ = get_all s2 in
       let _ = check_length (List.length k1s + List.length k2s + 1 ) t in
-      let merged_cn = get_cn s1 @ get_cn s2 in
+      let merged_cn = cn1 @ cn2 in
       if (root && one_key && not iroot) then
-        let mk, mp = get_hd parent, List.hd (get_pls parent) in
+        let ks, pls, _, _, _ = get_all parent in
+        let mk, mp = List.hd ks, List.hd pls in
         if s1_leaf then Lf (k1s @ (mk::k2s), p1s @ (mp::p2s), true, t)
         else Il (k1s @ (mk::k2s), p1s @ (mp::p2s), merged_cn, true, t)
       else
@@ -338,9 +320,10 @@ let rec swap tree oldpair newpair ckey found index =
   else swap_child tree [ckey] false
 
 let steal tree ckey morec =
-  let t, next = get_degree tree, get_next tree ckey in
+  let _, _, _, root, t = get_all tree in
+  let next = get_next tree ckey in
   let ca, cb = get_child tree [ckey], get_child tree next in
-  let mt = merge tree ckey ca cb true (is_root tree) in
+  let mt = merge tree ckey ca cb true root in
   let mc = get_child mt next in
   let lim = (if ca=morec then (n_keys ca - 1) else if cb=morec then t else -1) in
   if lim = -1 then raise (NotFound "child node not found")
@@ -349,8 +332,8 @@ let steal tree ckey morec =
 let rec deletev tree k ckey swapped =
   if ckey<0 then tree
   else 
-    let ks, t, leaf, next = get_keys tree, get_degree tree, 
-    is_leaf tree, get_next tree ckey in
+    let ks, _, _, _, t = get_all tree in
+    let leaf, next = is_leaf tree, get_next tree ckey in
     let ca, cb = 
     if not leaf then get_child tree [ckey], get_child tree next 
     else null_tree, null_tree in
