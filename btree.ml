@@ -46,6 +46,7 @@ module Attrs = struct
   end
 
 module Tree_ops = struct
+  (* appends key k, payload p and child c to the head of each associated list *)
   let restore tree k p c = match tree with
   | Lf ([], [], r, t) -> Lf (k::[], p::[], r, t)
   | Lf (v::next, pl::pls, r, t) -> Lf (k::v::next, p::pl::pls, r, t)
@@ -53,6 +54,7 @@ module Tree_ops = struct
   | Il (v::next, pl::pls, cn, r, t) -> Il (k::v::next, p::pl::pls, c::cn, r, t)
   | _ -> raise (MalformedTree "invalid tree structure")
 
+  (* returns [next key] or [] if k is the rightmost key in the node *)
   let rec get_next tree k = match tree with
   | Il (v::next, _::pls, _::cn, r, t) ->
     if v=k then try [List.hd next] with Failure _ -> []
@@ -70,6 +72,7 @@ module Tree_ops = struct
     if v=k then pl else get_pl_from_key (Lf (next, pls, r, t)) k
   | _ -> raise (NotFound "payload associated with key not found")
 
+  (* returns either the left child of key in kl or the rightmost child if kl=[] *)
   let rec get_child tree kl =
     if Attrs.is_leaf tree then null_tree
     else match kl with
@@ -83,6 +86,7 @@ module Tree_ops = struct
       | Il ([], [], _::[], _, _) -> raise (NotFound "child node not found")
       | _ -> raise (MalformedTree "invalid tree structure"))
 
+  (* replaces the child node associated with kl with newc *)
   let rec replace_child tree kl newc =
     if Attrs.is_leaf tree then null_tree
     else match kl with
@@ -111,6 +115,7 @@ module Tree_ops = struct
     else restore (remove_key (Lf (next, pls, r, t)) k) v pl null_tree
   | _ -> raise (InvalidOperation "cannot remove key from internal node")
 
+  (* replaces the child nodes of the key in kl with newc *)
   let rec replace_and_remove tree kl newc =
     match kl with
     | [] -> raise (NotFound "merge key not given")
@@ -119,6 +124,23 @@ module Tree_ops = struct
         if v=k then (Il (next, pls, newc::cn, r, t)) 
         else restore (replace_and_remove (Il (next, pls, (c2::cn), r, t)) kl newc) v pl c1
       | _ -> raise (NotFound "merge key to remove not found"))
+
+  (* adds a key, payload and child to a node *)
+  (* key must not already be in the node *)
+  let rec update_node tree k p c1 c2 = match tree with
+  | Il (v::next, pl::pls, c::cn, r, t) -> 
+    if Attrs.is_leaf c1 != Attrs.is_leaf c then
+      raise (MalformedTree "child node type mismatch")
+    else if Attrs.get_hd c1 = Attrs.get_hd c then
+      Il (k::v::next, p::pl::pls, c1::c2::cn, r, t)
+    else restore (update_node (Il (next, pls, cn, r, t)) k p c1 c2) v pl c
+  | Il ([], [], c::cn, r, t) -> (* right-most node *)
+    if Attrs.is_leaf c1 != Attrs.is_leaf c then 
+      raise (MalformedTree "child node type mismatch")
+    else if Attrs.get_hd c1 = Attrs.get_hd c then 
+      Il (k::[], p::[], c1::c2::cn, r, t)
+    else raise (NotFound "child node to replace not found")
+  | _ -> raise (MalformedTree "invalid tree structure")
   end
 
 open Attrs
@@ -144,23 +166,6 @@ match tree with
     else restore (search (Lf (next, pls, r, t)) k) v pl (Lf ([], [], false, 0))
   else raise (NotFound "key not found")
 | _ -> raise (NotFound "key not found")
-
-(* adds a key, payload and child to a node *)
-(* key must not already be in the node *)
-let rec update_node tree k p c1 c2 = match tree with
-| Il (v::next, pl::pls, c::cn, r, t) -> 
-  if is_leaf c1 != is_leaf c then
-    raise (MalformedTree "child node type mismatch")
-  else if get_hd c1 = get_hd c then
-    Il (k::v::next, p::pl::pls, c1::c2::cn, r, t)
-  else restore (update_node (Il (next, pls, cn, r, t)) k p c1 c2) v pl c
-| Il ([], [], c::cn, r, t) -> (* right-most node *)
-  if is_leaf c1 != is_leaf c then 
-    raise (MalformedTree "child node type mismatch")
-  else if get_hd c1 = get_hd c then 
-    Il (k::[], p::[], c1::c2::cn, r, t)
-  else raise (NotFound "child node to replace not found")
-| _ -> raise (MalformedTree "invalid tree structure")
 
 (* splits a node in two on a given key index *)
 (* migrates key to parent node and returns parent, which may now be full *)
