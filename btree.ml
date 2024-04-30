@@ -416,7 +416,7 @@ let rec deletev tree k ckey swapped =
         (* merge around key to delete if neither child node has enough keys *)
       else 
         let tr = merge tree ckey ca cb false in deletev tr k (get_hd tr) false
-    else if not (leftc || rightc) then deletev tree k (List.hd next) swapped
+    else if not (leftc || rightc) then deletev tree k (List.hd next) false
     else if not leaf then
       let c = if lempty || (rightc && not rempty) then cb else ca in
       let ok = (leftc && not lempty) || (rightc && not rempty) in
