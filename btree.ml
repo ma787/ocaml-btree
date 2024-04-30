@@ -159,7 +159,7 @@ module Tree_ops = struct
       | _ -> raise (NotFound "merge key to remove not found"))
 
   (* adds a key, payload and child to a node
- * key must not already be in the node *)
+   * key must not already be in the node *)
   let rec update_node tree k p c1 c2 = match tree with
   | Il (v::next, pl::pls, c::cn, r, t) -> 
     if Attrs.is_leaf c1 != Attrs.is_leaf c then
