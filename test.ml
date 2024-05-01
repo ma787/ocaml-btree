@@ -1,31 +1,70 @@
 open OUnit2
 open Btree
+open Attrs
+open Tree_ops
 
-let rec is_valid_tree tree acc = match tree with
-| Il (v::next, pl::pls, c::cn, r, t) ->
-  let lk, lp = List.length (v::next) + acc, List.length (pl::pls) + acc in 
-  let lc = if acc=0 then List.length (c::cn) else lk+1 in
-  if lk != lp then false
-  else if (not r && (lk < (t-1) || lk > (2*t -1))) then false
-  else if (not r && (lc < t || lc > 2*t)) || (r && lc<2) then false
-  else (is_valid_tree c 0) && (is_valid_tree (Il (next, pls, cn, r, t)) (acc+1))
-| Il ([], [], c::[], _, _) -> is_valid_tree c 0
-| Lf (ks, pls, r, t) ->
-  let lk, lp = List.length ks, List.length pls in
-  if lk != lp then false
-  else if r then true
-  else if lk < (t-1) || lk > (2*t -1) then false
-  else true
-| _ -> false
+module KeyandPl = struct
+  type t = int * int
+  let compare e1 e2 = Int.compare (fst e1) (fst e2)
+end
 
-let rec payload_match tree items = 
-let rec get_pair tree k = match tree with
-| Il (v::next, pl::pls, _::cn, r, t) -> if v=k then (v, pl) else get_pair (Il (next, pls, cn, r, t)) k
-| Lf (v::next, pl::pls, r, t) -> if v=k then (v, pl) else get_pair (Lf (next, pls, r, t)) k
-| _ -> raise (NotFound "key not found in node") in match items with
-| (k, pl)::its -> let c = search tree k in let tk, tp = get_pair c k in
-tk=k && tp=pl && payload_match tree its
-| [] -> true
+module KeyAndPlSet = Set.Make(KeyandPl)
+
+let get_last tree =
+  let rec last l = match l with
+  | c::cs -> if cs=[] then c else last cs 
+  | [] -> raise (Failure "empty list") in
+  match tree with
+  | Lf (ks, _, _, _) -> last ks
+  | Il (ks, _, _, _, _) -> last ks
+
+let is_valid_tree tree =
+  let rec valid_tree tree ckey visited =
+    if ckey=[] then 
+      let c2 = get_child tree ckey in valid_tree c2 [get_hd c2] false
+    else if visited then 
+      let c1 = get_child tree ckey in valid_tree c1 [get_hd c1] false
+    else let leaf, next = is_leaf tree, get_next tree (List.hd ckey) in
+    let ks, pls, cn, r, t = get_all tree in
+    let lk, lp, lc = List.length ks, List.length pls, List.length cn in
+    if lk != lp || (not leaf && lc != lk+1) then false
+    else if r && leaf then true
+    else if not r && (lk < (t-1) || lk > (2*t-1)) then false
+    else if leaf then true
+    else let c1 = get_child tree ckey in
+      valid_tree c1 [get_hd c1] false && valid_tree tree next true in
+  let ks, pls, _, r, _ = get_all tree in
+  if not r then false
+  else if ks=[] then pls=[] && (is_leaf tree)
+  else valid_tree tree [get_hd tree] false
+
+let payload_match tree items =
+  let rec check_node tree items ckey visited =
+    let go_next next new_items =
+      let c1 = get_child tree ckey in
+      let matched, next_items = check_node c1 new_items [get_hd c1] false in
+      if not (matched && List.hd ckey > get_last c1) then false, next_items
+      else if next=[] then let c2 = get_child tree next in
+        let c2_hd = get_hd c2 in 
+        if List.hd ckey >= c2_hd then false, next_items
+        else check_node c2 next_items [c2_hd] false
+      else check_node tree next_items next true in
+    let leaf, next = is_leaf tree, get_next tree (List.hd ckey) in
+    if visited then go_next next items
+    else let ks, pls, _, _, _ = get_all tree in
+      let combined = List.combine ks pls in
+      let node_items = KeyAndPlSet.of_list combined in
+      if not (combined=(KeyAndPlSet.elements node_items)) then false, items
+      else 
+        if not KeyAndPlSet.(is_empty (diff node_items items)) then false, items
+        else let new_items = KeyAndPlSet.diff items node_items in
+          if leaf then true, new_items else go_next next new_items in
+  let ks, _, _, _, _ = get_all tree in
+  if ks=[] then true
+  else
+    let item_set = KeyAndPlSet.of_list items in 
+    let matched, new_items = check_node tree item_set [get_hd tree] false in
+    matched && KeyAndPlSet.is_empty new_items
 
 let remove_items items toremove = let eq a b = a=b in let m a = not (List.exists (eq a) toremove) in List.filter m items
 let rec keys_from_pair items = match items with
@@ -86,33 +125,33 @@ let c2 = insert_list c1 tr3;;
 let c3 = delete_list c ks2;;
 
 let tests = "test suite for btree" >::: [
-  "inserting a series of elements (t=2)" >:: (fun _ -> assert_bool "" (is_valid_tree a 0));
+  "inserting a series of elements (t=2)" >:: (fun _ -> assert_bool "" (is_valid_tree a));
   "payloads and keys match (t=2)" >:: (fun _ -> assert_bool "" (payload_match a its));
-  "deleting 5 elements maintains tree structure (t=2)" >:: (fun _ -> assert_bool "" (is_valid_tree a1 0));
+  "deleting 5 elements maintains tree structure (t=2)" >:: (fun _ -> assert_bool "" (is_valid_tree a1));
   "deleting 5 elements maintains key/payload pairs (t=2)" >:: (fun _ -> assert_bool "" (payload_match a1 its1));
-  "deleting 10 elements maintains tree structure (t=2)" >:: (fun _ -> assert_bool "" (is_valid_tree a2 0));
+  "deleting 10 elements maintains tree structure (t=2)" >:: (fun _ -> assert_bool "" (is_valid_tree a2));
   "deleting 10 elements maintains key/payload pairs (t=2)" >:: (fun _ -> assert_bool "" (payload_match a2 its2));
-  "reinserting the deleted elements maintains tree structure (t=2)" >:: (fun _ -> assert_bool "" (is_valid_tree a3 0));
+  "reinserting the deleted elements maintains tree structure (t=2)" >:: (fun _ -> assert_bool "" (is_valid_tree a3));
   "reinserting the deleted elements maintains key/payload pairs (t=2)" >:: (fun _ -> assert_bool "" (payload_match a3 its));
-  "deleting all elements results in valid tree (t=2)" >:: (fun _ -> assert_bool "" (is_valid_tree a4 0));
+  "deleting all elements results in valid tree (t=2)" >:: (fun _ -> assert_bool "" (is_valid_tree a4));
   "deleting all elements results in empty tree (t=2)" >:: (fun _ -> assert_equal a4 (Lf ([], [], true, 2)));
-  "inserting a series of elements (t=3)" >:: (fun _ -> assert_bool "" (is_valid_tree a 0));
+  "inserting a series of elements (t=3)" >:: (fun _ -> assert_bool "" (is_valid_tree a));
   "payloads and keys match (t=3)" >:: (fun _ -> assert_bool "" (payload_match a its));
-  "deleting 5 elements maintains tree structure (t=3)" >:: (fun _ -> assert_bool "" (is_valid_tree b1 0));
+  "deleting 5 elements maintains tree structure (t=3)" >:: (fun _ -> assert_bool "" (is_valid_tree b1));
   "deleting 5 elements maintains key/payload pairs (t=3)" >:: (fun _ -> assert_bool "" (payload_match b1 its1));
-  "deleting 10 elements maintains tree structure (t=3)" >:: (fun _ -> assert_bool "" (is_valid_tree b2 0));
+  "deleting 10 elements maintains tree structure (t=3)" >:: (fun _ -> assert_bool "" (is_valid_tree b2));
   "deleting 10 elements maintains key/payload pairs (t=3)" >:: (fun _ -> assert_bool "" (payload_match b2 its2));
-  "reinserting the deleted elements maintains tree structure (t=3)" >:: (fun _ -> assert_bool "" (is_valid_tree b3 0));
+  "reinserting the deleted elements maintains tree structure (t=3)" >:: (fun _ -> assert_bool "" (is_valid_tree b3));
   "reinserting the deleted elements maintains key/payload pairs (t=3)" >:: (fun _ -> assert_bool "" (payload_match b3 its));
-  "deleting all elements results in valid tree (t=3)" >:: (fun _ -> assert_bool "" (is_valid_tree b4 0));
+  "deleting all elements results in valid tree (t=3)" >:: (fun _ -> assert_bool "" (is_valid_tree b4));
   "deleting all elements results in empty tree (t=3)" >:: (fun _ -> assert_equal b4 (Lf ([], [], true, 3)));
-  "inserting a series of elements (random t)" >:: (fun _ -> assert_bool "" (is_valid_tree c 0));
+  "inserting a series of elements (random t)" >:: (fun _ -> assert_bool "" (is_valid_tree c));
   "payloads and keys match (random t)" >:: (fun _ -> assert_bool "" (payload_match c its3));
-  "deleting random number of elements maintains tree structure (random t)" >:: (fun _ -> assert_bool "" (is_valid_tree c1 0));
+  "deleting random number of elements maintains tree structure (random t)" >:: (fun _ -> assert_bool "" (is_valid_tree c1));
   "deleting random number of elements maintains key/payload pairs (random t)" >:: (fun _ -> assert_bool "" (payload_match c1 its4));
-  "reinserting the deleted elements maintains tree structure (random t)" >:: (fun _ -> assert_bool "" (is_valid_tree c2 0));
+  "reinserting the deleted elements maintains tree structure (random t)" >:: (fun _ -> assert_bool "" (is_valid_tree c2));
   "reinserting the deleted elements maintains key/payload pairs (random t)" >:: (fun _ -> assert_bool "" (payload_match c2 its3));
-  "deleting all elements results in valid tree (random t)" >:: (fun _ -> assert_bool "" (is_valid_tree c3 0));
+  "deleting all elements results in valid tree (random t)" >:: (fun _ -> assert_bool "" (is_valid_tree c3));
   "deleting all elements results in empty tree (random t)" >:: (fun _ -> assert_equal c3 (Lf ([], [], true, bf))) 
 ]
 

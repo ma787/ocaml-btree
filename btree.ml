@@ -273,20 +273,13 @@ let rec merge parent ckey s1 s2 ignore =
     if m1 && m2 then
       let k1s, p1s, cn1, _, _ = get_all s1 in
       let k2s, p2s, cn2, _, _ = get_all s2 in
-      let _ = check_length (List.length k1s + List.length k2s + 1 ) t in
-      let merged_cn = cn1 @ cn2 in
-      if (root && one_key && not ignore) then
-        let ks, pls, _, _, _ = get_all parent in
-        let mk, mp = List.hd ks, List.hd pls in
-        if s1_leaf then Lf (k1s @ (mk::k2s), p1s @ (mp::p2s), true, t)
-        else Il (k1s @ (mk::k2s), p1s @ (mp::p2s), merged_cn, true, t)
-      else
-        let merged_ks = k1s @ (ckey::k2s) in
-        let merged_pls = p1s @ ((get_pl_from_key parent ckey)::p2s) in
-        let s = 
-          if s1_leaf then (Lf (merged_ks, merged_pls, false, t))
-          else (Il (merged_ks, merged_pls, merged_cn, false, t)) in
-        replace_and_remove parent [ckey] s
+      let _ = check_length (List.length k1s + List.length k2s + 1) t in
+      let mp, merged_cn = get_pl_from_key parent ckey, cn1 @ cn2 in
+      let merged_ks, merged_pls = k1s @ (ckey::k2s), p1s @ (mp::p2s) in
+      let reduce = root && one_key && not ignore in
+      let s = if s1_leaf then Lf (merged_ks, merged_pls, reduce, t)
+      else Il (merged_ks, merged_pls, merged_cn, reduce, t) in
+      if reduce then s else replace_and_remove parent [ckey] s
     else if next=[] then raise (NotFound "could not find sibling nodes")
     else merge parent (List.hd next) s1 s2 ignore
 
