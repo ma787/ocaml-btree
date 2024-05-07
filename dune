@@ -1,4 +1,4 @@
 (executables
  (names btree test)
- (libraries ounit2)
+ (libraries fmt cstruct ounit2 logs)
  (modes byte exe))
