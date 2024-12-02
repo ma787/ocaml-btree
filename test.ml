@@ -91,12 +91,6 @@ let rec take oldl newl n = if n=0 then newl else match oldl with
 | [] -> raise (Failure "out of range") in
 take (drop l li) [] (ui-li)
 
-let string_of_pair_list l =
-let rec string_of_pairs l = match l with
-| (k, pl)::cs -> "(" ^ (string_of_int k) ^ ", " ^ (string_of_int pl) ^ ")" ^ (if cs=[] then "" else ", " ^ (string_of_pairs cs))
-| [] -> "" in
-"[" ^ (string_of_pairs l) ^ "]"
-
 let its = [(63, 1); (16, 2); (51, 3); (77, 4); (61, 5); (43, 6); (57, 7); (12, 8); (44, 9); (72, 10); (45, 11); (34, 12); (20, 13); (7, 14); (93, 15); (29, 16); (58, 17); (59, 18); (60, 19); (62, 20)];;
 let item_set = KeyAndPlSet.of_list its
 let ks = keys_from_pair its;;
